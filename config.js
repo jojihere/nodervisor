@@ -47,23 +47,74 @@ config.port = process.env.PORT || 3000;
 config.env = process.env.ENV || 'production';
 config.sessionSecret = process.env.SECRET || '1234567890ABCDEF';
 
+
+
+
+var AWS = require('aws-sdk');
+var ec2 = new AWS.EC2({region: 'us-west-2'});
+
 // Read and write settings
 config.readHosts = function(db, callback){
-	var query = db('hosts')
-		.join('groups', 'hosts.idGroup', '=', 'groups.idGroup', 'left')
-		.select('hosts.idHost', 'hosts.Name', 'hosts.Url', 'groups.Name AS GroupName');
 
-	query.exec(function(err, data){
-		var hosts = {};
-		for (var host in data) {
-			hosts[data[host].idHost] = data[host];
-		}
-		config.hosts = hosts;
-		// Call the callback passed
-		if (callback) {
-			callback();
-		}
-	});
+	var params =  {
+        Filters : [
+            {
+                Name: 'tag:env',
+                Values: [
+                    'prod'
+                ]
+            },
+            {
+                Name: 'tag:code',
+                Values: [
+                    'integrations'
+                ]
+            },
+            {
+                Name: 'instance-state-code',
+                Values: [
+                    '16'
+                ]
+            }
+        ]
+    };
+
+    ec2.describeInstances(params, function(err, response) {
+        if(err) {
+            return callback(err);
+        }
+
+        var hosts = {};
+        
+        response.Reservations.forEach(function(reservation) {
+            reservation.Instances.forEach(function(instance) {
+        	 	var name = '';
+
+                for (var i = 0; i < instance.Tags.length; i++) {
+                	var tag = instance.Tags[i];
+                	if(tag.Key == 'Name')
+                		name = tag.Value;
+                };
+            	var host = {
+            		Name : name,
+                	idHost : instance.InstanceId,
+                	Url : 'http://' + instance.PublicIpAddress + ':9001',
+                	GroupName : 'integration_workers'
+                };
+               
+                hosts[host.idHost] = host;
+            });
+
+            config.hosts = hosts;
+			// Call the callback passed
+			if (callback) {
+				callback();
+			}
+        });
+        
+       	
+
+    });
 };
 
 module.exports = config;
